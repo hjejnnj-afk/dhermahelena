@@ -1,0 +1,32 @@
+{
+  "rewrites": [
+    {
+      "source": "/atendimento-app/:path*",
+      "destination": "https://chatwoot-chatwoot.syaw15.easypanel.host/:path*"
+    },
+    {
+      "source": "/vite/assets/:path*",
+      "destination": "https://chatwoot-chatwoot.syaw15.easypanel.host/vite/assets/:path*"
+    },
+    {
+      "source": "/manifest.json",
+      "destination": "https://chatwoot-chatwoot.syaw15.easypanel.host/manifest.json"
+    },
+    {
+      "source": "/api/v1/:path*",
+      "destination": "https://chatwoot-chatwoot.syaw15.easypanel.host/api/v1/:path*"
+    },
+    {
+      "source": "/auth/:path*",
+      "destination": "https://chatwoot-chatwoot.syaw15.easypanel.host/auth/:path*"
+    },
+    {
+      "source": "/cable",
+      "destination": "https://chatwoot-chatwoot.syaw15.easypanel.host/cable"
+    },
+    {
+      "source": "/packs/:path*",
+      "destination": "https://chatwoot-chatwoot.syaw15.easypanel.host/packs/:path*"
+    }
+  ]
+}
