@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/atendimento-app/:path*",
+      "destination": "https://chatwoot-chatwoot.syaw15.easypanel.host/:path*"
+    }
+  ]
+}
