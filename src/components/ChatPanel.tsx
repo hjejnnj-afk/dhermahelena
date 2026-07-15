@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, BotOff, Loader2, RefreshCw, Send } from "lucide-react";
+import { Bot, BotOff, Loader2, RefreshCw, Search, Send, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -58,6 +58,36 @@ async function cwFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+function Avatar({ nome, url, size = 9 }: { nome: string; url?: string | null; size?: 9 | 10 }) {
+  const [erro, setErro] = useState(false);
+  const iniciais = nome
+    .replace(/^~\s*/, "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("");
+  const cls = size === 10 ? "h-10 w-10" : "h-9 w-9";
+  if (url && !erro) {
+    return (
+      <img
+        src={url}
+        alt={nome}
+        onError={() => setErro(true)}
+        className={`${cls} shrink-0 rounded-full object-cover`}
+        referrerPolicy="no-referrer"
+      />
+    );
+  }
+  return (
+    <div
+      className={`${cls} flex shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground`}
+    >
+      {iniciais || "?"}
+    </div>
+  );
+}
+
 const PAUSA_OPCOES = [
   { label: "15 minutos", minutos: 15 },
   { label: "30 minutos", minutos: 30 },
@@ -75,6 +105,9 @@ export function ChatPanel({ usuarioAtual }: ChatPanelProps) {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [selecionada, setSelecionada] = useState<number | null>(null);
+  const [busca, setBusca] = useState("");
+  const [resultadosBusca, setResultadosBusca] = useState<CwConversation[] | null>(null);
+  const [buscando, setBuscando] = useState(false);
 
   const carregarConversas = useCallback(async () => {
     try {
@@ -96,20 +129,94 @@ export function ChatPanel({ usuarioAtual }: ChatPanelProps) {
     return () => clearInterval(t);
   }, [carregarConversas]);
 
+  // Busca estilo WhatsApp: conteúdo de mensagens, nome e número (via API),
+  // com debounce de 400ms. Busca vazia volta pra lista normal.
+  useEffect(() => {
+    const q = busca.trim();
+    if (!q) {
+      setResultadosBusca(null);
+      setBuscando(false);
+      return;
+    }
+    setBuscando(true);
+    const t = setTimeout(async () => {
+      try {
+        const data = await cwFetch<{
+          data?: { payload?: CwConversation[] };
+          payload?: CwConversation[];
+        }>(`/conversations/search?q=${encodeURIComponent(q)}`);
+        setResultadosBusca(data.data?.payload ?? data.payload ?? []);
+      } catch {
+        setResultadosBusca([]); // filtro local abaixo ainda cobre nome/número
+      } finally {
+        setBuscando(false);
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [busca]);
+
+  const listaExibida = useMemo(() => {
+    const q = busca.trim().toLowerCase();
+    if (!q) return conversas;
+    const digitos = q.replace(/\D/g, "");
+    const localMatch = conversas.filter((c) => {
+      const nome = (c.meta?.sender?.name || "").toLowerCase();
+      const phone = (c.meta?.sender?.phone_number || "").replace(/\D/g, "");
+      return nome.includes(q) || (digitos.length > 0 && phone.includes(digitos));
+    });
+    const daApi = resultadosBusca ?? [];
+    const vistos = new Set<number>();
+    return [...localMatch, ...daApi].filter((c) => {
+      if (vistos.has(c.id)) return false;
+      vistos.add(c.id);
+      return true;
+    });
+  }, [conversas, resultadosBusca, busca]);
+
+  const todasConhecidas = useMemo(() => {
+    const map = new Map<number, CwConversation>();
+    for (const c of [...conversas, ...(resultadosBusca ?? [])]) map.set(c.id, c);
+    return map;
+  }, [conversas, resultadosBusca]);
+
   const conversaAtiva = useMemo(
-    () => conversas.find((c) => c.id === selecionada) ?? null,
-    [conversas, selecionada],
+    () => todasConhecidas.get(selecionada ?? -1) ?? null,
+    [todasConhecidas, selecionada],
   );
 
   return (
-    <div className="flex h-[calc(100vh-140px)] min-h-[480px] overflow-hidden rounded-lg border bg-card">
+    <div className="flex h-[calc(100vh-96px)] min-h-[480px] overflow-hidden rounded-lg border bg-card">
       {/* Lista de conversas */}
       <aside className="flex w-80 shrink-0 flex-col border-r">
-        <div className="flex items-center justify-between border-b px-3 py-2">
-          <h3 className="text-sm font-semibold">Conversas</h3>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={carregarConversas}>
-            <RefreshCw className="h-3.5 w-3.5" />
-          </Button>
+        <div className="space-y-2 border-b px-3 py-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold">Conversas</h3>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={carregarConversas}>
+              <RefreshCw className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+          <div className="relative">
+            {buscando ? (
+              <Loader2 className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-muted-foreground" />
+            ) : (
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            )}
+            <Input
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              placeholder="Buscar por nome, número ou mensagem…"
+              className="h-8 pl-8 pr-7 text-sm"
+            />
+            {busca && (
+              <button
+                type="button"
+                onClick={() => setBusca("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -123,10 +230,12 @@ export function ChatPanel({ usuarioAtual }: ChatPanelProps) {
               {erro}. Verifique as variáveis VITE_CHATWOOT_* na Vercel e o proxy /cw-api.
             </p>
           )}
-          {!carregando && !erro && conversas.length === 0 && (
-            <p className="p-4 text-sm text-muted-foreground">Nenhuma conversa aberta agora.</p>
+          {!carregando && !erro && listaExibida.length === 0 && (
+            <p className="p-4 text-sm text-muted-foreground">
+              {busca.trim() ? "Nada encontrado para essa busca." : "Nenhuma conversa aberta agora."}
+            </p>
           )}
-          {conversas.map((c) => (
+          {listaExibida.map((c) => (
             <ConversaRow
               key={c.id}
               conversa={c}
@@ -178,6 +287,7 @@ function ConversaRow({
       )}
       onClick={onSelect}
     >
+      <Avatar nome={nome} url={conversa.meta?.sender?.thumbnail} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <span className="truncate text-sm font-medium">{nome}</span>
@@ -342,9 +452,12 @@ function MensagensView({ conversa }: { conversa: CwConversation }) {
 
   return (
     <>
-      <div className="border-b px-4 py-2.5">
-        <div className="text-sm font-semibold">{nome}</div>
-        <div className="text-xs text-muted-foreground">{formatPhone(phone)}</div>
+      <div className="flex items-center gap-3 border-b px-4 py-2.5">
+        <Avatar nome={nome} url={conversa.meta?.sender?.thumbnail} size={10} />
+        <div>
+          <div className="text-sm font-semibold">{nome}</div>
+          <div className="text-xs text-muted-foreground">{formatPhone(phone)}</div>
+        </div>
       </div>
 
       <div className="flex-1 space-y-2 overflow-y-auto p-4">
