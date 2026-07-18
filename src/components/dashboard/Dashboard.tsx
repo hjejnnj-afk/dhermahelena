@@ -450,8 +450,19 @@ export default function Dashboard() {
         </header>
 
         {view === "atendimento" && (
-          <main className="w-full p-3">
-            <ChatPanel usuarioAtual={usuarioAtual} />
+          <main className="fixed inset-0 z-40 flex flex-col bg-white">
+            <div className="flex shrink-0 items-center gap-2 border-b border-neutral-200 bg-neutral-50 px-3 py-1.5">
+              <button
+                onClick={() => setView("dashboard")}
+                className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-neutral-600 transition-colors hover:bg-neutral-200 hover:text-neutral-900"
+              >
+                ← Voltar
+              </button>
+              <span className="text-sm font-semibold text-neutral-800">Atendimento</span>
+            </div>
+            <div className="min-h-0 flex-1">
+              <ChatPanel usuarioAtual={usuarioAtual} />
+            </div>
           </main>
         )}
         {view === "pausas" && (
