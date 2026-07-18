@@ -36,6 +36,12 @@ interface CwConversation {
   unread_count?: number;
 }
 
+interface CwAttachment {
+  id: number;
+  file_type: string; // audio | image | video | file ...
+  data_url: string;
+}
+
 interface CwMessage {
   id: number;
   content: string | null;
@@ -43,6 +49,7 @@ interface CwMessage {
   created_at: number;
   sender?: { name?: string } | null;
   private?: boolean;
+  attachments?: CwAttachment[];
 }
 
 async function cwFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -185,10 +192,10 @@ export function ChatPanel({ usuarioAtual }: ChatPanelProps) {
   );
 
   return (
-    <div className="flex h-[calc(100vh-96px)] min-h-[480px] overflow-hidden rounded-lg border bg-card">
+    <div className="flex h-[calc(100vh-96px)] min-h-[480px] overflow-hidden rounded-lg border bg-white text-neutral-900">
       {/* Lista de conversas */}
-      <aside className="flex w-80 shrink-0 flex-col border-r">
-        <div className="space-y-2 border-b px-3 py-2">
+      <aside className="flex w-80 shrink-0 flex-col border-r border-neutral-200 bg-white">
+        <div className="space-y-2 border-b border-neutral-200 bg-neutral-50 px-3 py-2">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold">Conversas</h3>
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={carregarConversas}>
@@ -282,8 +289,8 @@ function ConversaRow({
   return (
     <div
       className={cn(
-        "flex cursor-pointer items-center gap-2 border-b px-3 py-2.5 transition-colors hover:bg-muted/60",
-        ativa && "bg-muted",
+        "flex cursor-pointer items-center gap-2 border-b border-neutral-100 px-3 py-2.5 transition-colors hover:bg-neutral-100",
+        ativa && "bg-neutral-100",
       )}
       onClick={onSelect}
     >
@@ -297,7 +304,7 @@ function ConversaRow({
             </span>
           )}
         </div>
-        <p className="truncate text-xs text-muted-foreground">{preview || formatPhone(phone)}</p>
+        <p className="truncate text-xs text-neutral-500">{preview || formatPhone(phone)}</p>
       </div>
 
       <PausarButton phone={phone} usuarioAtual={usuarioAtual} pausas={pausas} />
@@ -413,7 +420,14 @@ function MensagensView({ conversa }: { conversa: CwConversation }) {
       const data = await cwFetch<{ payload: CwMessage[] }>(
         `/conversations/${conversa.id}/messages`,
       );
-      setMensagens((data.payload ?? []).filter((m) => m.message_type !== 2 && !m.private));
+      setMensagens(
+        (data.payload ?? []).filter(
+          (m) =>
+            m.message_type !== 2 &&
+            !m.private &&
+            (m.content || (m.attachments && m.attachments.length > 0)),
+        ),
+      );
     } catch {
       /* mantém as mensagens atuais em caso de falha momentânea */
     }
@@ -452,15 +466,15 @@ function MensagensView({ conversa }: { conversa: CwConversation }) {
 
   return (
     <>
-      <div className="flex items-center gap-3 border-b px-4 py-2.5">
+      <div className="flex items-center gap-3 border-b border-neutral-200 bg-neutral-50 px-4 py-2.5">
         <Avatar nome={nome} url={conversa.meta?.sender?.thumbnail} size={10} />
         <div>
           <div className="text-sm font-semibold">{nome}</div>
-          <div className="text-xs text-muted-foreground">{formatPhone(phone)}</div>
+          <div className="text-xs text-neutral-500">{formatPhone(phone)}</div>
         </div>
       </div>
 
-      <div className="flex-1 space-y-2 overflow-y-auto p-4">
+      <div className="flex-1 space-y-2 overflow-y-auto bg-[#efeae2] p-4">
         {mensagens.map((m) => (
           <div
             key={m.id}
@@ -468,12 +482,37 @@ function MensagensView({ conversa }: { conversa: CwConversation }) {
           >
             <div
               className={cn(
-                "max-w-[75%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm",
+                "max-w-[75%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm shadow-sm",
                 m.message_type === 1
-                  ? "rounded-br-sm bg-primary text-primary-foreground"
-                  : "rounded-bl-sm bg-muted",
+                  ? "rounded-br-sm bg-[#d9fdd3] text-neutral-900"
+                  : "rounded-bl-sm bg-white text-neutral-900",
               )}
             >
+              {m.attachments?.map((a) =>
+                a.file_type === "audio" ? (
+                  <audio key={a.id} controls preload="none" className="max-w-full py-1">
+                    <source src={a.data_url} />
+                  </audio>
+                ) : a.file_type === "image" ? (
+                  <a key={a.id} href={a.data_url} target="_blank" rel="noopener noreferrer">
+                    <img
+                      src={a.data_url}
+                      alt="Imagem enviada"
+                      className="my-1 max-h-64 rounded-lg object-contain"
+                    />
+                  </a>
+                ) : (
+                  <a
+                    key={a.id}
+                    href={a.data_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block py-1 text-sm underline"
+                  >
+                    📎 Abrir anexo ({a.file_type})
+                  </a>
+                ),
+              )}
               {m.content}
             </div>
           </div>
@@ -481,7 +520,7 @@ function MensagensView({ conversa }: { conversa: CwConversation }) {
         <div ref={bottomRef} />
       </div>
 
-      <div className="flex items-center gap-2 border-t p-3">
+      <div className="flex items-center gap-2 border-t border-neutral-200 bg-neutral-50 p-3">
         <Input
           placeholder="Escreva uma resposta… (a Helena pausa automaticamente ao enviar)"
           value={texto}
