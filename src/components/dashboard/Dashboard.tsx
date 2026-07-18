@@ -450,7 +450,7 @@ export default function Dashboard() {
         </header>
 
         {view === "atendimento" && (
-          <main className="mx-auto max-w-[1400px] space-y-4 px-4 py-6 sm:px-6">
+          <main className="w-full p-3">
             <ChatPanel usuarioAtual={usuarioAtual} />
           </main>
         )}
