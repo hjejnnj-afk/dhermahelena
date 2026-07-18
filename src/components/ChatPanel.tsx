@@ -192,7 +192,7 @@ export function ChatPanel({ usuarioAtual }: ChatPanelProps) {
   );
 
   return (
-    <div className="flex h-[calc(100vh-96px)] min-h-[480px] overflow-hidden rounded-lg border bg-white text-neutral-900">
+    <div className="flex h-full min-h-0 overflow-hidden bg-white text-neutral-900">
       {/* Lista de conversas */}
       <aside className="flex w-80 shrink-0 flex-col border-r border-neutral-200 bg-white">
         <div className="space-y-2 border-b border-neutral-200 bg-neutral-50 px-3 py-2">
@@ -420,11 +420,14 @@ function MensagensView({ conversa }: { conversa: CwConversation }) {
       const data = await cwFetch<{ payload: CwMessage[] }>(
         `/conversations/${conversa.id}/messages`,
       );
+      const ehReacao = (c: string | null) =>
+        !!c && (c.includes("[ reação ]") || c.includes("[ removeu reação ]"));
       setMensagens(
         (data.payload ?? []).filter(
           (m) =>
             m.message_type !== 2 &&
             !m.private &&
+            !ehReacao(m.content) &&
             (m.content || (m.attachments && m.attachments.length > 0)),
         ),
       );
@@ -513,7 +516,9 @@ function MensagensView({ conversa }: { conversa: CwConversation }) {
                   </a>
                 ),
               )}
-              {m.content}
+              {m.attachments?.length && /^\[[^\]]+\]$/.test((m.content ?? "").trim())
+                ? null
+                : m.content}
             </div>
           </div>
         ))}
