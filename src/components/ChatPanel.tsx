@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, BotOff, Loader2, RefreshCw, Search, Send, X } from "lucide-react";
+import {
+  Bot,
+  BotOff,
+  Loader2,
+  Mic,
+  Paperclip,
+  RefreshCw,
+  Search,
+  Send,
+  Square,
+  Trash2,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -52,6 +64,22 @@ interface CwMessage {
   attachments?: CwAttachment[];
 }
 
+async function cwUpload(conversaId: number, files: File[], content?: string): Promise<void> {
+  const form = new FormData();
+  if (content) form.append("content", content);
+  form.append("message_type", "outgoing");
+  for (const f of files) form.append("attachments[]", f);
+  const res = await fetch(
+    `${CW_BASE}/accounts/${CW_ACCOUNT}/conversations/${conversaId}/messages`,
+    {
+      method: "POST",
+      headers: { api_access_token: CW_TOKEN }, // sem Content-Type: o browser define o boundary do multipart
+      body: form,
+    },
+  );
+  if (!res.ok) throw new Error(`Falha ao enviar anexo (${res.status})`);
+}
+
 async function cwFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${CW_BASE}/accounts/${CW_ACCOUNT}${path}`, {
     ...init,
@@ -93,6 +121,20 @@ function Avatar({ nome, url, size = 9 }: { nome: string; url?: string | null; si
       {iniciais || "?"}
     </div>
   );
+}
+
+function formatHoraMsg(unixSeconds: number): string {
+  const d = new Date(unixSeconds * 1000);
+  if (isNaN(d.getTime())) return "";
+  const hora = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const hoje = new Date();
+  const mesmoDia =
+    d.getDate() === hoje.getDate() &&
+    d.getMonth() === hoje.getMonth() &&
+    d.getFullYear() === hoje.getFullYear();
+  if (mesmoDia) return hora;
+  const dataCurta = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+  return `${dataCurta} ${hora}`;
 }
 
 const PAUSA_OPCOES = [
@@ -413,7 +455,20 @@ function MensagensView({ conversa }: { conversa: CwConversation }) {
   const [mensagens, setMensagens] = useState<CwMessage[]>([]);
   const [texto, setTexto] = useState("");
   const [enviando, setEnviando] = useState(false);
+  const [arquivos, setArquivos] = useState<File[]>([]);
+  const [gravando, setGravando] = useState(false);
+  const [segGravacao, setSegGravacao] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const cancelouGravacaoRef = useRef(false);
+
+  useEffect(() => {
+    if (!gravando) return;
+    const t = setInterval(() => setSegGravacao((v) => v + 1), 1000);
+    return () => clearInterval(t);
+  }, [gravando]);
 
   const carregar = useCallback(async () => {
     try {
@@ -448,20 +503,70 @@ function MensagensView({ conversa }: { conversa: CwConversation }) {
 
   async function enviar() {
     const content = texto.trim();
-    if (!content || enviando) return;
+    if ((!content && arquivos.length === 0) || enviando) return;
     setEnviando(true);
     try {
-      await cwFetch(`/conversations/${conversa.id}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ content, message_type: "outgoing" }),
-      });
-      setTexto("");
+      if (arquivos.length > 0) {
+        await cwUpload(conversa.id, arquivos, content || undefined);
+        setArquivos([]);
+        setTexto("");
+      } else {
+        await cwFetch(`/conversations/${conversa.id}/messages`, {
+          method: "POST",
+          body: JSON.stringify({ content, message_type: "outgoing" }),
+        });
+        setTexto("");
+      }
       await carregar();
     } catch {
-      /* mantém o texto no campo pra tentar de novo */
+      /* mantém o conteúdo pra tentar de novo */
     } finally {
       setEnviando(false);
     }
+  }
+
+  async function iniciarGravacao() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : "";
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      chunksRef.current = [];
+      cancelouGravacaoRef.current = false;
+      rec.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setGravando(false);
+        setSegGravacao(0);
+        if (cancelouGravacaoRef.current) return;
+        const blob = new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" });
+        if (blob.size === 0) return;
+        const ext = (rec.mimeType || "audio/webm").includes("ogg") ? "ogg" : "webm";
+        const file = new File([blob], `audio-${Date.now()}.${ext}`, { type: blob.type });
+        setEnviando(true);
+        try {
+          await cwUpload(conversa.id, [file]);
+          await carregar();
+        } catch {
+          /* falha de envio do áudio: usuário pode regravar */
+        } finally {
+          setEnviando(false);
+        }
+      };
+      recorderRef.current = rec;
+      rec.start();
+      setGravando(true);
+    } catch {
+      /* microfone negado/indisponível */
+    }
+  }
+
+  function pararGravacao(cancelar: boolean) {
+    cancelouGravacaoRef.current = cancelar;
+    recorderRef.current?.stop();
   }
 
   const nome = conversa.meta?.sender?.name || "Contato";
@@ -519,27 +624,118 @@ function MensagensView({ conversa }: { conversa: CwConversation }) {
               {m.attachments?.length && /^\[[^\]]+\]$/.test((m.content ?? "").trim())
                 ? null
                 : m.content}
+              <span
+                className={cn(
+                  "mt-0.5 block text-right text-[10px] leading-none",
+                  m.message_type === 1 ? "text-neutral-500" : "text-neutral-400",
+                )}
+              >
+                {formatHoraMsg(m.created_at)}
+              </span>
             </div>
           </div>
         ))}
         <div ref={bottomRef} />
       </div>
 
-      <div className="flex items-center gap-2 border-t border-neutral-200 bg-neutral-50 p-3">
-        <Input
-          placeholder="Escreva uma resposta… (a Helena pausa automaticamente ao enviar)"
-          value={texto}
-          onChange={(e) => setTexto(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              enviar();
-            }
-          }}
-        />
-        <Button onClick={enviar} disabled={enviando || !texto.trim()} size="icon">
-          {enviando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-        </Button>
+      <div className="border-t border-neutral-200 bg-neutral-50 p-3">
+        {arquivos.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {arquivos.map((f, i) => (
+              <span
+                key={`${f.name}-${i}`}
+                className="flex items-center gap-1.5 rounded-full border border-neutral-300 bg-white px-2.5 py-1 text-xs text-neutral-700"
+              >
+                📎 {f.name.length > 28 ? `${f.name.slice(0, 25)}…` : f.name}
+                <button
+                  type="button"
+                  onClick={() => setArquivos((prev) => prev.filter((_, j) => j !== i))}
+                  className="text-neutral-400 hover:text-neutral-700"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {gravando ? (
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-2 text-sm font-medium text-red-600">
+              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-600" />
+              Gravando… {Math.floor(segGravacao / 60)}:{String(segGravacao % 60).padStart(2, "0")}
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => pararGravacao(true)}
+                title="Cancelar gravação"
+              >
+                <Trash2 className="h-4 w-4 text-red-600" />
+              </Button>
+              <Button onClick={() => pararGravacao(false)} size="icon" title="Enviar áudio">
+                <Send className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                const novos = Array.from(e.target.files ?? []);
+                if (novos.length) setArquivos((prev) => [...prev, ...novos]);
+                e.target.value = "";
+              }}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => fileInputRef.current?.click()}
+              title="Anexar arquivo ou imagem"
+              className="text-neutral-500 hover:text-neutral-900"
+            >
+              <Paperclip className="h-5 w-5" />
+            </Button>
+            <Input
+              placeholder="Escreva uma resposta… (a Helena pausa automaticamente ao enviar)"
+              value={texto}
+              onChange={(e) => setTexto(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  enviar();
+                }
+              }}
+            />
+            {texto.trim() || arquivos.length > 0 ? (
+              <Button onClick={enviar} disabled={enviando} size="icon" title="Enviar">
+                {enviando ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+              </Button>
+            ) : (
+              <Button
+                onClick={iniciarGravacao}
+                disabled={enviando}
+                size="icon"
+                title="Gravar áudio"
+              >
+                {enviando ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Mic className="h-4 w-4" />
+                )}
+              </Button>
+            )}
+          </div>
+        )}
       </div>
     </>
   );
